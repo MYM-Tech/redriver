@@ -1,10 +1,11 @@
+// Package redriver allows in-code retry handling retry of SQS message, and partial failures in multi-message processing.
 package redriver
 
 import (
 	"fmt"
+	"github.com/aws/aws-sdk-go/aws/session"
 
 	"github.com/aws/aws-lambda-go/events"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
 )
 
@@ -55,6 +56,13 @@ func (redriver Redriver) processMessageAsync(message events.SQSMessage, processo
 
 // HandleMessages handles asynchronously all SQS messages, and deletes it when they are processed.
 func (redriver Redriver) HandleMessages(messages []events.SQSMessage, processor MessageProcessor) error {
+	awsSession, err := session.NewSession()
+	if err != nil {
+		return fmt.Errorf("can't create an AWS session, reason: %s", err.Error())
+	}
+
+	sqsConnector := sqs.New(awsSession)
+
 	messagesCount := len(messages)
 	var processedMessages []processResult
 	var failures []processResult
@@ -84,9 +92,6 @@ func (redriver Redriver) HandleMessages(messages []events.SQSMessage, processor 
 	if len(failures) == messagesCount {
 		return fmt.Errorf("all messages processing failed, %+v", failures)
 	}
-
-	awsSession := session.Must(session.NewSession())
-	sqsConnector := sqs.New(awsSession)
 
 	if err := redriver.deleteProcessedMessages(&processedMessages, sqsConnector); err != nil {
 		return err
