@@ -41,7 +41,7 @@ func myEventProcessor(event events.SQSMessage) error {
 }
 
 func HandleEvent(_ context.Context, sqsEvent events.SQSEvent) error {
-	messageRedriver := redriver.Redriver{Retries: 3, ConsumedQueueURL: "https://..."}
+	messageRedriver := redriver.Redriver{Retries: uint64(3), ConsumedQueueURL: "https://..."}
 	
 	return messageRedriver.HandleMessages(sqsEvent.Records, myEventProcessor)
 }
@@ -51,13 +51,13 @@ func main() {
 }
 ```
 
-You may also wrap the processor in a closure to pass dependencies, or you can use a middleware:
+You may also wrap the processor in a closure to pass dependencies, or you to use a middleware:
 
 ```go
 package main
 
 func HandleEvent(_ context.Context, sqsEvent events.SQSEvent) error {
-	messageRedriver := redriver.Redriver{Retries: 3, ConsumedQueueURL: "https://..."}
+	messageRedriver := redriver.Redriver{Retries: uint64(3), ConsumedQueueURL: "https://..."}
 	
 	return messageRedriver.HandleMessages(sqsEvent.Records, func(event events.SQSMessage) error {
 		fmt.Println("Start processing of a message")
@@ -68,3 +68,9 @@ func HandleEvent(_ context.Context, sqsEvent events.SQSEvent) error {
 ```
 
 Returning the error of the Redriver is a good practice (because of the explanation above about lambda error handling), and if you don't do so, you will anyway need to return an error from the main handler if the Redriver returned one.
+
+The Redriver will fail early if it can't create an AWS session, or if the retry parameter is < 1.
+
+## Note
+
+Using `uint64` may seem a bit overkill but it allows for a *very* large amount of retries in case you need it.

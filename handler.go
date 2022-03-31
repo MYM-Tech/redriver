@@ -2,17 +2,18 @@
 package redriver
 
 import (
+	"errors"
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws/session"
 
 	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
 )
 
 // Redriver is the main struct used to store policy and redrive messages.
 type Redriver struct {
 	ConsumedQueueURL string
-	Retries          int
+	Retries          uint64
 }
 
 type processResult struct {
@@ -41,7 +42,7 @@ func (redriver Redriver) deleteProcessedMessages(processedMessages *[]processRes
 func (redriver Redriver) processMessageAsync(message events.SQSMessage, processor MessageProcessor, processResultChannel chan<- processResult) {
 	go func() {
 		var processorError error
-		for i := 1; i <= redriver.Retries; i++ {
+		for i := uint64(1); i <= redriver.Retries; i++ {
 			processorError = processor(message)
 
 			if processorError == nil {
@@ -56,6 +57,10 @@ func (redriver Redriver) processMessageAsync(message events.SQSMessage, processo
 
 // HandleMessages handles asynchronously all SQS messages, and deletes it when they are processed.
 func (redriver Redriver) HandleMessages(messages []events.SQSMessage, processor MessageProcessor) error {
+	if redriver.Retries < 1 {
+		return errors.New("retries must be 1 or above")
+	}
+
 	awsSession, err := session.NewSession()
 	if err != nil {
 		return fmt.Errorf("can't create an AWS session, reason: %s", err.Error())
