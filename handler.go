@@ -14,6 +14,7 @@ import (
 type Redriver struct {
 	ConsumedQueueURL string
 	Retries          uint64
+	Debug            bool
 }
 
 type processResult struct {
@@ -61,12 +62,14 @@ func (redriver Redriver) HandleMessages(messages []events.SQSMessage, processor 
 		return errors.New("retries must be 1 or above")
 	}
 
-	awsSession, err := session.NewSession()
-	if err != nil {
-		return fmt.Errorf("can't create an AWS session, reason: %s", err.Error())
+	var sqsConnector *sqs.SQS
+	if !redriver.Debug {
+		awsSession, err := session.NewSession()
+		if err != nil {
+			return fmt.Errorf("can't create an AWS session, reason: %s", err.Error())
+		}
+		sqsConnector = sqs.New(awsSession)
 	}
-
-	sqsConnector := sqs.New(awsSession)
 
 	messagesCount := len(messages)
 	var processedMessages []processResult
@@ -96,6 +99,11 @@ func (redriver Redriver) HandleMessages(messages []events.SQSMessage, processor 
 	// All messages failed.
 	if len(failures) == messagesCount {
 		return fmt.Errorf("all messages processing failed, %+v", failures)
+	}
+
+	// Debug mode is active
+	if redriver.Debug {
+		return nil
 	}
 
 	if err := redriver.deleteProcessedMessages(&processedMessages, sqsConnector); err != nil {
