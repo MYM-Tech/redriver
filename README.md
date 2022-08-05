@@ -71,6 +71,24 @@ Returning the error of the Redriver is a good practice (because of the explanati
 
 The Redriver will fail early if it can't create an AWS session, or if the retry parameter is < 1.
 
+## Debug Mode
+
+Debug mode is available for local tests.
+
+Activating debug mode will disable the following features :
+- Connexion to the SQS queue
+- Deletion of successfully handled message from the SQS queue
+
+```go
+package main
+
+func HandleEvent(_ context.Context, sqsEvent events.SQSEvent) error {
+	messageRedriver := redriver.Redriver{Retries: uint64(3), ConsumedQueueURL: "https://...", Debug: true}
+
+	// Do something...
+}
+```
+
 ## Note
 
 Using `uint64` may seem a bit overkill but it allows for a *very* large amount of retries in case you need it.
