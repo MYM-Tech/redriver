@@ -4,7 +4,6 @@ package redriver
 import (
 	"errors"
 	"fmt"
-
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
@@ -17,16 +16,11 @@ type Redriver struct {
 	Debug            bool
 }
 
-type processResult struct {
-	message events.SQSMessage
-	err     error
-}
-
 // MessageProcessor is the required function signature for processors.
 type MessageProcessor = func(event events.SQSMessage) error
 
-func (redriver Redriver) deleteProcessedMessages(processedMessages *[]processResult, sqsConnector *sqs.SQS) error {
-	for _, processedMessage := range *processedMessages {
+func (redriver Redriver) deleteProcessedMessages(processedMessages processResults, sqsConnector *sqs.SQS) error {
+	for _, processedMessage := range processedMessages.successResults {
 		_, err := sqsConnector.DeleteMessage(&sqs.DeleteMessageInput{
 			QueueUrl:      &redriver.ConsumedQueueURL,
 			ReceiptHandle: &processedMessage.message.ReceiptHandle,
@@ -40,19 +34,18 @@ func (redriver Redriver) deleteProcessedMessages(processedMessages *[]processRes
 	return nil
 }
 
-func (redriver Redriver) processMessageAsync(message events.SQSMessage, processor MessageProcessor, processResultChannel chan<- processResult) {
+func (redriver Redriver) processMessageAsync(message events.SQSMessage, processor MessageProcessor, processResultChannel chan<- *processResult) {
 	go func() {
 		var processorError error
 		for i := uint64(1); i <= redriver.Retries; i++ {
 			processorError = processor(message)
 
 			if processorError == nil {
-				processResultChannel <- processResult{message, nil}
-				return
+				break
 			}
 		}
 
-		processResultChannel <- processResult{message, processorError}
+		processResultChannel <- newProcessResult(message, processorError)
 	}()
 }
 
@@ -71,44 +64,26 @@ func (redriver Redriver) HandleMessages(messages []events.SQSMessage, processor 
 		sqsConnector = sqs.New(awsSession)
 	}
 
-	messagesCount := len(messages)
-	var processedMessages []processResult
-	var failures []processResult
-
-	processResultChannel := make(chan processResult)
+	processedMessagesResult := newProcessResults(messages)
+	processResultChannel := make(chan *processResult)
 	defer close(processResultChannel)
 
 	for _, message := range messages {
 		redriver.processMessageAsync(message, processor, processResultChannel)
 	}
 
-	for i := 0; i < messagesCount; i++ {
-		processResult := <-processResultChannel
-		if processResult.err != nil {
-			failures = append(failures, processResult)
-			continue
-		}
-		processedMessages = append(processedMessages, processResult)
+	for i := 0; i < processedMessagesResult.messagesCount; i++ {
+		res := <-processResultChannel
+		processedMessagesResult.addResult(res)
 	}
 
-	// All messages processed.
-	if len(processedMessages) == messagesCount {
+	if processedMessagesResult.hasOnlySuccessfulMessages() {
 		return nil
 	}
 
-	// All messages failed.
-	if len(failures) == messagesCount {
-		return fmt.Errorf("all messages processing failed, %+v", failures)
-	}
-
-	// Debug mode is active
-	if redriver.Debug {
-		return nil
-	}
-
-	if err := redriver.deleteProcessedMessages(&processedMessages, sqsConnector); err != nil {
+	if err := redriver.deleteProcessedMessages(*processedMessagesResult, sqsConnector); !redriver.Debug && err != nil {
 		return err
 	}
 
-	return fmt.Errorf("%d messages failed, %+v", len(failures), failures)
+	return processResultsError{Results: *processedMessagesResult}
 }
