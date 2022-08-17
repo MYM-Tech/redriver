@@ -7,6 +7,7 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
+	log "github.com/sirupsen/logrus"
 )
 
 // Redriver is the main struct used to store policy and redrive messages.
@@ -21,6 +22,11 @@ type MessageProcessor = func(event events.SQSMessage) error
 
 func (redriver Redriver) deleteProcessedMessages(processedMessages processResults, sqsConnector *sqs.SQS) error {
 	for _, processedMessage := range processedMessages.successResults {
+		if redriver.Debug {
+			log.Infof("Debug mode enabled. Mocking deletion of message with ID %s", processedMessage.message.MessageId)
+			continue
+		}
+
 		_, err := sqsConnector.DeleteMessage(&sqs.DeleteMessageInput{
 			QueueUrl:      &redriver.ConsumedQueueURL,
 			ReceiptHandle: &processedMessage.message.ReceiptHandle,
@@ -81,7 +87,7 @@ func (redriver Redriver) HandleMessages(messages []events.SQSMessage, processor 
 		return nil
 	}
 
-	if err := redriver.deleteProcessedMessages(*processedMessagesResult, sqsConnector); !redriver.Debug && err != nil {
+	if err := redriver.deleteProcessedMessages(*processedMessagesResult, sqsConnector); err != nil {
 		return err
 	}
 
